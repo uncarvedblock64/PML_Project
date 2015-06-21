@@ -20,30 +20,12 @@ vector machines (SVMs) were trained on the dataset and assessed against the 5
 known classes of dumbbell biceps curls as intended in the experiment design. 
 The final SVM model was able to obtain strong predictive accurancy on all 5
 classes of the excercise.
-```{r, echo=FALSE,warning=FALSE,message=FALSE}
-library('caret')
-```
+
 
 # Methodology and Approach
 
 Support Vector Machines, SVMs, are supervised learning models that can be used for classification and regression analysis.  The kernel of a SVM determines how the model behaves.  The SVM used is this analysis used the Radial Basis Function Kernel, which in effect converts each training data point into a training variable.  Each training case using the Radial Basis Frunction is compared each other point in the training data.  This is how it creates non-linear classification boundaries.  Detailed discussion of SVMs is available from many sources including Wikipedia (see references).
-```{r readdata,echo=FALSE,warning=FALSE,message=FALSE,cache=TRUE}
-setwd('~/R/coursera_jhu/PracticalMachineLearn/project/')
-activitydf <- read.csv('pml-training.csv', header=TRUE, row.names=1, na.strings ="NA")
-blankorna <- function(vector) {
-  sum(is.na(vector), vector == "", na.rm = TRUE)
-}
-columninfo <- apply(activitydf, 2, blankorna)
-# unique(columninfo == 0 | columninfo == 19216)
-# [1] TRUE
-pricols <- columninfo == 0
-# sum(complete.cases(activitydf[,pricols]))
-# [1] 19622
-sumcols <- columninfo == 19216
-summaryrows <- complete.cases(activitydf[,sumcols])
-activitydf <- activitydf[!summaryrows, pricols]
-activitydf <- activitydf[,-1*1:6]
-```
+
 
 ## Variable Selection
   
@@ -70,26 +52,7 @@ while refining the SVM input parameters: cost and gamma.  The final model
 predicted Kappa and Accurancy levels above 0.99 so further reduction of
 variables was not performed.  
   
-```{r partitiondata,echo=FALSE,warning=FALSE,message=FALSE,cache=TRUE}
-set.seed(1235711)
-trainindex <- createDataPartition(activitydf$classe, p=0.6, list=FALSE)
-training <- activitydf[trainindex,]
 
-tempdf <- activitydf[-trainindex,]
-testindex <- createDataPartition(tempdf$classe, p=0.5, list=FALSE)
-testing <- tempdf[testindex,]
-validation <- tempdf[-testindex,]
-
-# checkpercentage <- function(df) {
-#   tbl <- aggregate(data.frame(count=rep(1,nrow(df))), list(df$classe), length)
-#   tbl$percentage <- tbl$count / sum(tbl$count)
-#   tbl
-# }
-# checkpercentage(training)
-# checkpercentage(testing)
-# checkpercentage(validation)
-# nrow(training) + nrow(testing) + nrow(validation)
-```
 
 ## Training and Testing Models
 
@@ -111,22 +74,9 @@ case, but with 19216 data points it is possible that the results while not as
 good could have still be acceptible.
 
 ## Support Vector Machine: Parameter Selection
-```{r trainingfunction,echo=FALSE,warning=FALSE,message=FALSE,cache=TRUE}
-library('e1071')
-clsindx <- length(activitydf)
-trainsvmparam <- function(cost, gamma = 1/(clsindx - 1)) {
-  modsvm01 <- svm(classe ~ ., data = training, cost = cost, gamma = gamma, cachesize = 200)
-  predictions <- predict(modsvm01, newdata = testing[, -clsindx])
-  confuMat <- confusionMatrix(data = predictions, reference = testing[, clsindx])
-  confuMat$overall[c('Kappa', 'Accuracy')]
-}
-```
 
-```{r doParallelinit,echo=FALSE,warning=FALSE,message=FALSE}
-library("doParallel")
-cl <- makeCluster(detectCores()-2)
-registerDoParallel(cl)
-```
+
+
 
 The two parameters needed to train the SVM model are _cost_ and _gamma_.  
   
@@ -143,99 +93,21 @@ The second set of paramters explored were:
  - *Gamma:*   0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10  
   
 The best performing parameters were found to be gamma at 0.02 and cost at 95.
-```{r parameterexplore,echo=FALSE,warning=FALSE,message=FALSE,results="hide",cache=TRUE}
-costcoefs <- 5 * 2^(0:7)
-gammacoefs <- 0.005 * 2^(1:6)
-costcoefs <- 50 + 5 * (1:10)
-gammacoefs <- 0.01*(1:10)
-# costcoefs <- c(10, 20)
-# gammacoefs <- c(1 / (clsindx - 1), 1 / (2*(clsindx - 1)))
-prepop <- rep(NA , length(costcoefs) * length(gammacoefs))
-expmatrix <- data.frame(cost = prepop, gamma = prepop, kappa = prepop, accuracy = prepop)
 
-## procedure if not using doParallel
-# indx <- 0
-# for (c in costcoefs) {
-#   for (g in gammacoefs) {
-#     indx <- indx + 1
-#     metrics <- trainsvmparam(c, g)
-#     expmatrix[indx, ] <- c(c, g, metrics)
-#   }
-# }
 
-indx <- 1
-endx <- 0
-len_g <- length(gammacoefs)
 
-ptime <- system.time({
-  for (c in costcoefs) {
-    endx <- (indx + len_g - 1)
-    block <- foreach (g = gammacoefs, .combine = rbind, .packages = c('e1071','caret')) %dopar% {
-      metrics <- trainsvmparam(c, g)
-      c(c, g, metrics)
-    }
-    print(block)
-    expmatrix[indx:endx, ] <- block
-    indx <- endx + 1
-  }
-}) 
-```
 
-```{r elapsedtimeandstopparallel,echo=FALSE,warning=FALSE,message=FALSE,results="hide"}
-# 48 parameter combinations
-# runtime in minutes ~= 11 min on i7 4770, 16GB DDR3
-ptime['elapsed'] / 60
-stopCluster(cl)
-```
 
-```{r loadmorelibraries,echo=FALSE,warning=FALSE,message=FALSE}
-library(ggplot2)
-library(reshape2)
-```
 
-```{r graphparameters,echo=FALSE,warning=FALSE,message=FALSE,cache=TRUE, fig.height=5, fig.width=8}
-graphmatrix <- expmatrix[,-4]
-graphmatrix$gamma <- as.factor(graphmatrix$gamma)
-p <- ggplot(data = graphmatrix, aes(x = cost, y = kappa))
-p <- p + geom_line(aes(colour = gamma), size = 2)
-p <- p + labs(title = "SVM Parameter Selection\nCost and Gamma",
-              colour = "Gamma\nParameters",
-              x = "Cost Parameters",
-              y = "Predicted Kappa Value\nfrom Testing Subset")
-p
-```
+![plot of chunk graphparameters](figure/graphparameters-1.png) 
   
 *Figure 1:* Graph of Results from Model Comparisons Using Test Data Set  
   
 
 # Support Vector Machine: Final Model
-```{r bestparameters,echo=FALSE,warning=FALSE,eval=FALSE,message=FALSE}
-expmatrix[expmatrix$kappa == max(expmatrix$kappa) | 
-            expmatrix$accuracy == max(expmatrix$accuracy), ]
 
-##### partitions using sample()
-#    cost gamma     kappa  accuracy
-# 52   64  0.08 0.9917733 0.9934947
-# 60  128  0.08 0.9917733 0.9934947
-# 
-#    cost gamma     kappa  accuracy
-# 22   80  0.08 0.9917733 0.9934947
-# 28  160  0.08 0.9917733 0.9934947
 
-##### partitions using createDataPartition()
-#    cost gamma     kappa  accuracy
-# 26   80  0.02 0.9937454 0.9950559
-#    cost gamma     kappa  accuracy
-# 82   95  0.02 0.9944038 0.9955764
-```
 
-```{r accuracyprediction, echo=FALSE,warning=FALSE,message=FALSE,cache=TRUE}
-# create model by running svm() with prior determined optimal svm parameters 
-# should do this all automatically if have time
-modelsvm <- svm(classe ~ ., data = training, cost = 95, gamma = 0.02, cachesize = 200)
-predictions <- predict(modelsvm, newdata = validation[, -clsindx])
-confuMat <- confusionMatrix(data = predictions, reference = validation[, clsindx])
-```
 
 The final SVM model was trained using 60% of the dataset.  The parameters cost =
 95 and gamma = 0.02 were selected based on the model's Kappa value on the test
@@ -247,38 +119,27 @@ seperate "test set" in 'pml-testing.csv' and corrrectly predicted each case.
 The following tables summarize its performance on the validation dataset.  
   
   
-```{r finalmodel,echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
-overallresults <- confuMat$overall[-7]
-print(confuMat$overall[-c(5, 7)], digits = 3)
-```
+      Accuracy          Kappa  AccuracyLower  AccuracyUpper AccuracyPValue 
+         0.993          0.991          0.990          0.995          0.000 
 
-```{r resultsbyclasse,echo=FALSE,warning=FALSE,message=FALSE}
-knitr::kable(t(confuMat$byClass), digits = 3) 
-```
+
+|                     | Class: A| Class: B| Class: C| Class: D| Class: E|
+|:--------------------|--------:|--------:|--------:|--------:|--------:|
+|Sensitivity          |    0.999|    0.988|    0.990|    0.987|    0.997|
+|Specificity          |    0.997|    0.999|    0.997|    0.998|    1.000|
+|Pos Pred Value       |    0.993|    0.995|    0.988|    0.990|    0.999|
+|Neg Pred Value       |    1.000|    0.997|    0.998|    0.998|    0.999|
+|Prevalence           |    0.285|    0.193|    0.174|    0.164|    0.184|
+|Detection Rate       |    0.285|    0.191|    0.173|    0.162|    0.183|
+|Detection Prevalence |    0.287|    0.192|    0.175|    0.163|    0.183|
+|Balanced Accuracy    |    0.998|    0.993|    0.994|    0.993|    0.998|
   
 *Figure 2:* Final Model Statistics by Classe  
   
 
-```{r testcasesubmit, echo=FALSE,warning=FALSE,message=FALSE}
-testsubmitdf <- read.csv('pml-testing.csv', header=TRUE, row.names=1, na.strings ="NA")
-# pricols <- columninfo == 0
-# sumcols <- columninfo == 19216
-testsubmitdf <- testsubmitdf[, pricols]
-testsubmitdf <- testsubmitdf[,-1*1:6]
-predictSubmit <- predict(modelsvm, newdata = testsubmitdf[, -clsindx])
-```
 
-```{r writesubmissions, echo=FALSE,warning=FALSE,message=FALSE}
-setwd('~/R/coursera_jhu/PracticalMachineLearn/project/submission/')
-pml_write_files = function(x){
-  n = length(x)
-  for(i in 1:n){
-    filename = paste0("problem_id_",i,".txt")
-    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
-  }
-}
-pml_write_files(predictSubmit)
-```
+
+
 
 # References
  - Dataset link: http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises
