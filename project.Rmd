@@ -1,1 +1,292 @@
-/home/brian/Dropbox/projects/project.Rmd
+---
+title: "Human Activity Recognition"
+author: "Brian Morge"
+date: "June 19, 2015"
+output: html_document
+---
+
+Practical Machine Learning Course Project
+-----------------------------------------
+
+# Executive Summary
+The project is exploring the use of machine learning for human activity
+recognition.  The dataset is contains data from 6 participants performing
+Unilateral Dumbbell Biceps Curls in 5 different fashions.  The goal is the
+determine if the proper technique can be discerned from 4 classes of common
+mistakes in technique.  Sensors were attached to subjects arms, forearms, belts,
+and the dumbell.  For this purpose machine learning algorithms utilizing support
+vector machines (SVMs) were trained on the dataset and assessed against the 5
+known classes of dumbbell biceps curls as intended in the experiment design. 
+The final SVM model was able to obtain strong predictive accurancy on all 5
+classes of the excercise.
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+library('caret')
+```
+
+# Methodology and Approach
+
+Support Vector Machines, SVMs, are similar to l
+```{r, echo=FALSE,warning=FALSE,message=FALSE,cache=FALSE}
+setwd('~/R/coursera_jhu/PracticalMachineLearn/project/')
+activitydf <- read.csv('pml-training.csv', header=TRUE, row.names=1, na.strings ="NA")
+blankorna <- function(vector) {
+  sum(is.na(vector), vector == "", na.rm = TRUE)
+}
+columninfo <- apply(activitydf, 2, blankorna)
+# unique(columninfo == 0 | columninfo == 19216)
+# [1] TRUE
+pricols <- columninfo == 0
+# sum(complete.cases(activitydf[,pricols]))
+# [1] 19622
+sumcols <- columninfo == 19216
+summaryrows <- complete.cases(activitydf[,sumcols])
+activitydf <- activitydf[!summaryrows, pricols]
+activitydf <- activitydf[,-1*1:6]
+```
+
+## Variable Selection
+  
+The source data had 159 variables including labeling variables such as 3
+timestamp variables, a user name variable, a 2 variables on window referening to
+the exercise repitition number.  I removed all the labeling variables as my goal
+was to determing the instantaneous exercise class without knowing who is
+performing it, when, and without timeseries information.  
+  
+Then after looking at the data it became apparent that there were a large number
+of variables with mostly NA values.  I calculated the quantity of NA values plus
+blanks for each variable.  The results showed that there were 100 variables that
+were NA or blank for exactly 19216 rows.  And contained actual values for just
+406 rows.  There rows contained summary information such as maximum, mininimum,
+avgerage, variance, standard deviation, amplitude, etc. for the other statistics
+over the exercise windows.  The remaining 59 variables had zero blanks on NAs. 
+The rows 406 summary rows and the 100 summary variables were removed from the
+data set.  The remaining variables were all instantaneous sensor data or derived
+from sensor data for each observation.  
+  
+After narrowing down the dataset to 59 variables. A SVM model was trained and it
+performed well, over 90% accuracy.  Further reduction of variables was put off
+while refining the SVM input parameters: cost and gamma.  The final model
+predicted Kappa and Accurancy levels above 0.99 so further reduction of
+variables was not performed.  
+  
+```{r, echo=FALSE,warning=FALSE,message=FALSE,cache=FALSE}
+set.seed(1235711)
+trainindex <- createDataPartition(activitydf$classe, p=0.6, list=FALSE)
+training <- activitydf[trainindex,]
+
+tempdf <- activitydf[-trainindex,]
+testindex <- createDataPartition(tempdf$classe, p=0.5, list=FALSE)
+testing <- tempdf[testindex,]
+validation <- tempdf[-testindex,]
+
+# checkpercentage <- function(df) {
+#   tbl <- aggregate(data.frame(count=rep(1,nrow(df))), list(df$classe), length)
+#   tbl$percentage <- tbl$count / sum(tbl$count)
+#   tbl
+# }
+# checkpercentage(training)
+# checkpercentage(testing)
+# checkpercentage(validation)
+# nrow(training) + nrow(testing) + nrow(validation)
+```
+
+## Training and Testing Models
+
+The provided training data contained 19216 rows after data cleaning was performed.  In order to test various model parameters and at the end assess model accuracy that data was split into 3 sets of data.
+ - 60%: Training Set
+ - 20%: Test Set
+ - 20%: Validation Set  
+  
+In each iteration the individual models were trained against the training set
+and the kappa and accuracy values were calculated by predicting the outcomes on
+the test set.  The final SVM model was the only model that performed predictions
+on the Validation set, in order to develop an accuracy measurement in model
+generalization.  
+  
+The `caret` package function `createDataPartition()` was used in seperating out
+the 3 data sets so that a representative portion of each exercise classe were
+available.  Using built in R sampling functions this will not in general be the
+case, but with 19216 data points it is possible that the results while not as
+good could have still be acceptible.
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+# set.seed(1235711)
+# m <- nrow(activitydf)
+# index <- sample(m)
+# trainindex <- index[1:trunc(m * 0.6)]
+# testindex <- index[(1 + trunc(m * 0.6)):trunc(m * 0.8)]
+# validationindex <- index[(1 + trunc(m * 0.8)):m]
+# training <- activitydf[trainindex,]
+# testing <-activitydf[testindex,]
+# validation <- activitydf[validationindex,]
+```
+
+## Support Vector Machine: Parameter Selection
+```{r, echo=FALSE,warning=FALSE,message=FALSE,cache=FALSE}
+library('e1071')
+clsindx <- length(activitydf)
+trainsvmparam <- function(cost, gamma = 1/(clsindx - 1)) {
+  modsvm01 <- svm(classe ~ ., data = training, cost = cost, gamma = gamma, cachesize = 200)
+  predictions <- predict(modsvm01, newdata = testing[, -clsindx])
+  confuMat <- confusionMatrix(data = predictions, reference = testing[, clsindx])
+  confuMat$overall[c('Kappa', 'Accuracy')]
+}
+```
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+library("doParallel")
+cl <- makeCluster(detectCores()-2)
+registerDoParallel(cl)
+```
+
+The two parameters needed to train the SVM model are _cost_ and _gamma_.  
+  
+The _cost_ parameter determines the about of regularization that occurs the SVM model.  A higher cost parameter increases the variance in the model and decreases the model regularization.  
+The _gamma_ parameter determines the radius of the SVM kernel, the Radial Basis Function.  A higher gamma corresponds to a smaller radius for the kernel.  gamma has an inverse relationship the variance and standard deviation.  The Radial Basis Function is sometimes referred to as the Gausian Kernel.  
+  
+The cost and gamma coefficients were assessed based on the model's overall Kappa coefficient and Accuracy for various configurations.  Two rounds of parameters were assessed first over a wide range, and next at closer range to narrow in on the final model's paramters.  
+The first set of parameters explored were:
+ - *Cost:*    5, 10, 20, 80, 160, 320, 640
+ - *Gamma:*   0.01, 0.02, 0.04, 0.08, 0.16, 0.32  
+  
+The second set of paramters explored were:  
+ - *Cost:*    55, 60, 65, 70, 75, 80, 85, 90, 95, 100
+ - *Gamma:*   0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10  
+  
+The best performing parameters were found to be gamma at 0.02 and cost at 95.
+```{r, echo=FALSE,warning=FALSE,message=FALSE,results="hide",cache=FALSE}
+costcoefs <- 5 * 2^(0:7)
+gammacoefs <- 0.005 * 2^(1:6)
+costcoefs <- 50 + 5 * (1:10)
+gammacoefs <- 0.01*(1:10)
+# costcoefs <- c(10, 20)
+# gammacoefs <- c(1 / (clsindx - 1), 1 / (2*(clsindx - 1)))
+prepop <- rep(NA , length(costcoefs) * length(gammacoefs))
+expmatrix <- data.frame(cost = prepop, gamma = prepop, kappa = prepop, accuracy = prepop)
+# indx <- 0
+# for (c in costcoefs) {
+#   for (g in gammacoefs) {
+#     indx <- indx + 1
+#     metrics <- trainsvmparam(c, g)
+#     expmatrix[indx, ] <- c(c, g, metrics)
+#   }
+# }
+indx <- 1
+endx <- 0
+len_g <- length(gammacoefs)
+
+ptime <- system.time({
+  for (c in costcoefs) {
+    endx <- (indx + len_g - 1)
+    block <- foreach (g = gammacoefs, .combine = rbind, .packages = c('e1071','caret')) %dopar% {
+      metrics <- trainsvmparam(c, g)
+      c(c, g, metrics)
+    }
+    print(block)
+    expmatrix[indx:endx, ] <- block
+    indx <- endx + 1
+  }
+}) 
+```
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE,results="hide"}
+# ?? parameter combinations
+# runtime in minutes ~= 23.5 min on i7 4770, 16GB DDR3
+# 48 parameter combinations
+# runtime in minutes ~= 11 min on i7 4770, 16GB DDR3
+ptime['elapsed'] / 60
+stopCluster(cl)
+```
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+library(ggplot2)
+library(reshape2)
+```
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE,cache=FALSE, fig.height=5, fig.width=8}
+graphmatrix <- expmatrix[,-4]
+graphmatrix$gamma <- as.factor(graphmatrix$gamma)
+p <- ggplot(data = graphmatrix, aes(x = cost, y = kappa))
+p <- p + geom_line(aes(colour = gamma), size = 2)
+p <- p + labs(title = "SVM Parameter Selection\nCost and Gamma",
+              colour = "Gamma\nParameters",
+              x = "Cost Parameters",
+              y = "Predicted Kappa Value\nfrom Testing Subset")
+p
+```
+
+## Support Vector Machine: Final Model
+```{r, echo=FALSE,warning=FALSE,eval=FALSE,message=FALSE}
+expmatrix[expmatrix$kappa == max(expmatrix$kappa) | 
+            expmatrix$accuracy == max(expmatrix$accuracy), ]
+
+##### partitions using sample()
+#    cost gamma     kappa  accuracy
+# 52   64  0.08 0.9917733 0.9934947
+# 60  128  0.08 0.9917733 0.9934947
+# 
+#    cost gamma     kappa  accuracy
+# 22   80  0.08 0.9917733 0.9934947
+# 28  160  0.08 0.9917733 0.9934947
+
+##### partitions using createDataPartition()
+#    cost gamma     kappa  accuracy
+# 26   80  0.02 0.9937454 0.9950559
+#    cost gamma     kappa  accuracy
+# 82   95  0.02 0.9944038 0.9955764
+```
+
+```{r accuracyprediction, echo=FALSE,warning=FALSE,message=FALSE,cache=FALSE}
+# create model by running svm() with prior determined optimal svm parameters 
+# should do this all automatically if have time
+modelsvm <- svm(classe ~ ., data = training, cost = 95, gamma = 0.02, cachesize = 200)
+predictions <- predict(modelsvm, newdata = validation[, -clsindx])
+confuMat <- confusionMatrix(data = predictions, reference = validation[, clsindx])
+```
+```{r, echo=FALSE,warning=FALSE,message=FALSE,results="asis"}
+print(modelsvm)
+overallresults <- confuMat$overall[-7]
+# names(overallresults)
+print(confuMat$overall[-c(5, 7)], digits = 3)
+```
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+knitr::kable(t(confuMat$byClass), digits = 3) 
+```
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+```
+
+```{r testcasesubmit, echo=FALSE,warning=FALSE,message=FALSE}
+testsubmitdf <- read.csv('pml-testing.csv', header=TRUE, row.names=1, na.strings ="NA")
+# pricols <- columninfo == 0
+# sumcols <- columninfo == 19216
+testsubmitdf <- testsubmitdf[, pricols]
+testsubmitdf <- testsubmitdf[,-1*1:6]
+predictSubmit <- predict(modelsvm, newdata = testsubmitdf[, -clsindx])
+```
+
+```{r writesubmission, echo=FALSE,warning=FALSE,message=FALSE}
+setwd('~/R/coursera_jhu/PracticalMachineLearn/project/submission/')
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(predictSubmit)
+```
+
+# References
+ - Dataset link: http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises
+ - Video describing usage of these types of sensors https://www.youtube.com/watch?v=meNf1b1yY0Y
+
+## Original Data Set Source
+
+### Qualitative Activity Recognition of Weight Lifting Exercises
+> Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th Augmented Human (AH) International Conference in cooperation with ACM SIGCHI (Augmented Human'13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201#ixzz3diXyRfUu  
+## License
+> Important: you are free to use this dataset for any purpose. This dataset is licensed under the Creative Commons license (CC BY-SA). The CC BY-SA license means you can remix, tweak, and build upon this work even for commercial purposes, as long as you credit the authors of the original work and you license your new creations under the identical terms we are licensing to you. This license is often compared to "copyleft" free and open source software licenses. All new works based on this dataset will carry the same license, so any derivatives will also allow commercial use.
+
